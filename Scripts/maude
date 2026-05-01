@@ -3,7 +3,7 @@
 #
 # Install (one-liner):
 #   curl -fsSL https://raw.githubusercontent.com/cloudxabide/devops/main/Files/home_bin_maude \
-#     -o ~/bin/maude && chmod +x ~/bin/maude
+#     -o /tmp/maude && install -m 0755 /tmp/maude ~/bin/maude && rm -f /tmp/maude
 #
 # Or use the built-in install flag:
 #   maude --install
@@ -61,10 +61,13 @@ for _arg in "$@"; do
   if [[ "$_arg" == "--install" ]]; then
     echo "Installing maude to ${MAUDE_INSTALL_DEST} ..."
     mkdir -p "$(dirname "${MAUDE_INSTALL_DEST}")"
-    if curl -fsSL "${MAUDE_INSTALL_URL}" -o "${MAUDE_INSTALL_DEST}"; then
-      chmod +x "${MAUDE_INSTALL_DEST}"
+    _tmp=$(mktemp)
+    if curl -fsSL "${MAUDE_INSTALL_URL}" -o "${_tmp}"; then
+      install -m 0755 "${_tmp}" "${MAUDE_INSTALL_DEST}"
+      rm -f "${_tmp}"
       echo "Installed successfully: ${MAUDE_INSTALL_DEST}"
     else
+      rm -f "${_tmp}"
       echo "ERROR: download failed from ${MAUDE_INSTALL_URL}" >&2
       exit 1
     fi
