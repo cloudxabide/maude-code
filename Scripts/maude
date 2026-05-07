@@ -15,6 +15,11 @@
 #                  (wall time, token counts, output token rate)
 #   --install      download latest version of this script to ~/bin/maude
 #   --             remaining args passed directly to claude
+#
+# Config file: ~/.config/maude.conf (optional, sourced as bash)
+#   DEFAULT_ENDPOINT="host:port"   – default endpoint (overrides built-in)
+#   DEFAULT_MODEL="model-name"     – skip model menu and use this model
+#   EXTRA_ENDPOINTS=(...)          – extra endpoints added to the menu
 
 set -euo pipefail
 
@@ -53,6 +58,19 @@ VERBOSE=0
 MAUDE_INSTALL_URL="https://raw.githubusercontent.com/cloudxabide/maude-code/refs/heads/main/Scripts/maude"
 MAUDE_INSTALL_DEST="${HOME}/bin/maude"
 
+# ── config file (~/.config/maude.conf) ────────────────────────────────────────
+# Recognised variables (set any/all):
+#   DEFAULT_ENDPOINT="host:port"   – overrides built-in default endpoint
+#   DEFAULT_MODEL="model-name"     – skip model menu and use this model
+#   EXTRA_ENDPOINTS=(...)          – extra endpoints appended to the menu
+EXTRA_ENDPOINTS=()
+MAUDE_CONF="${XDG_CONFIG_HOME:-${HOME}/.config}/maude.conf"
+if [[ -f "$MAUDE_CONF" ]]; then
+  # shellcheck source=/dev/null
+  source "$MAUDE_CONF"
+fi
+[[ ${#EXTRA_ENDPOINTS[@]} -gt 0 ]] && KNOWN_ENDPOINTS+=("${EXTRA_ENDPOINTS[@]}")
+
 usage() {
   grep '^#' "$0" | grep -v '#!/' | sed 's/^# \{0,1\}//'
   exit 1
@@ -88,6 +106,8 @@ while [[ $# -gt 0 ]]; do
     *)             break ;;
   esac
 done
+# Apply config DEFAULT_MODEL if -m was not given
+[[ -z "$MODEL" && -n "${DEFAULT_MODEL:-}" ]] && MODEL="${DEFAULT_MODEL}"
 
 # ── endpoint selection ────────────────────────────────────────────────────────
 if [[ $ENDPOINT_EXPLICIT -eq 0 ]]; then
@@ -184,15 +204,19 @@ if [[ -z "$MODEL" ]]; then
   while IFS= read -r line; do
     [[ -n "$line" ]] && MODELS+=("$line")
   done < <(
-    echo "$MODELS_JSON" | \
-      python3 -c "
+    if command -v jq >/dev/null 2>&1; then
+      echo "$MODELS_JSON" | \
+        jq -r '(.data // .models // [])[] | (.id // .name // "") | select(length > 0)'
+    else
+      echo "$MODELS_JSON" | \
+        python3 -c "
 import sys, json
 data = json.load(sys.stdin)
-# handle {models:[{name:...}]} (Ollama /api/tags) and {data:[{id:...}]} (OpenAI)
 items = data.get('data') or data.get('models') or []
 for m in items:
     print(m.get('id') or m.get('name') or '')
-" | grep -v '^$' | sort
+" | grep -v '^$'
+    fi | sort
   )
 
   if [[ ${#MODELS[@]} -eq 0 ]]; then
