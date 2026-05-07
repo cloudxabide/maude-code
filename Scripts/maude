@@ -2,15 +2,17 @@
 # maude - MyclAude: run claude(1) against a local OpenAI-compatible inference endpoint
 #
 # Install (one-liner):
-#   curl -fsSL https://raw.githubusercontent.com/cloudxabide/devops/main/Files/home_bin_maude \
+#   curl -fsSL https://raw.githubusercontent.com/cloudxabide/maude-code/refs/heads/main/Scripts/maude \
 #     -o /tmp/maude && install -m 0755 /tmp/maude ~/bin/maude && rm -f /tmp/maude
 #
 # Or use the built-in install flag:
 #   maude --install
 #
-# Usage: maude [-e HOST:PORT] [-m MODEL] [--install] [-- claude-args...]
+# Usage: maude [-e HOST:PORT] [-m MODEL] [-v] [--install] [-- claude-args...]
 #   -e HOST:PORT   endpoint (skip menu; default: localhost:11434)
 #   -m MODEL       model name; if omitted, a menu is shown
+#   -v             verbose: show setup details and post-session stats
+#                  (wall time, token counts, output token rate)
 #   --install      download latest version of this script to ~/bin/maude
 #   --             remaining args passed directly to claude
 
@@ -47,7 +49,8 @@ DEFAULT_ENDPOINT="${KNOWN_ENDPOINTS[0]}"
 ENDPOINT=""
 MODEL=""
 ENDPOINT_EXPLICIT=0
-MAUDE_INSTALL_URL="https://raw.githubusercontent.com/cloudxabide/devops/main/Files/home_bin_maude"
+VERBOSE=0
+MAUDE_INSTALL_URL="https://raw.githubusercontent.com/cloudxabide/maude-code/refs/heads/main/Scripts/maude"
 MAUDE_INSTALL_DEST="${HOME}/bin/maude"
 
 usage() {
@@ -79,6 +82,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     -e|--endpoint) ENDPOINT="$2"; ENDPOINT_EXPLICIT=1; shift 2 ;;
     -m|--model)    MODEL="$2";    shift 2 ;;
+    -v|--verbose)  VERBOSE=1;     shift ;;
     -h|--help)     usage ;;
     --)            shift; break ;;
     *)             break ;;
@@ -230,4 +234,66 @@ export ANTHROPIC_DEFAULT_OPUS_MODEL="${MODEL}"
 export DISABLE_TELEMETRY=1
 
 # ── launch claude ─────────────────────────────────────────────────────────────
-exec claude --model "${MODEL}" "$@"
+if [[ $VERBOSE -eq 0 ]]; then
+  exec claude --model "${MODEL}" "$@"
+fi
+
+# Verbose path: wrap session with wall-clock timing and post-session token stats.
+# Token data is read from claude's session JSONL in ~/.claude/projects/ after exit.
+_SESSION_MARKER=$(mktemp)
+_SESSION_START=$(date +%s)
+
+claude --model "${MODEL}" "$@"
+_RC=$?
+
+_SESSION_END=$(date +%s)
+_DURATION=$((_SESSION_END - _SESSION_START))
+
+_cwd_slug=$(pwd | sed 's|/|-|g')
+_proj_dir="${HOME}/.claude/projects/${_cwd_slug}"
+_session_jsonl=$(find "${_proj_dir}" -name "*.jsonl" -newer "${_SESSION_MARKER}" 2>/dev/null | tail -1)
+rm -f "${_SESSION_MARKER}"
+
+echo ""
+echo "── maude session stats ──────────────────────────"
+printf "  Wall time:     %dm %02ds\n" $((_DURATION / 60)) $((_DURATION % 60))
+
+if [[ -n "$_session_jsonl" ]]; then
+  MAUDE_JSONL="$_session_jsonl" MAUDE_DURATION="$_DURATION" python3 << 'PYEOF'
+import json, os
+
+path     = os.environ['MAUDE_JSONL']
+duration = int(os.environ['MAUDE_DURATION'])
+total_in = total_out = total_cr = total_cc = turns = 0
+
+with open(path) as f:
+    for line in f:
+        obj   = json.loads(line)
+        msg   = obj.get('message')
+        usage = msg.get('usage') if isinstance(msg, dict) else None
+        if usage:
+            total_in  += usage.get('input_tokens', 0)
+            total_out += usage.get('output_tokens', 0)
+            total_cr  += usage.get('cache_read_input_tokens', 0)
+            total_cc  += usage.get('cache_creation_input_tokens', 0)
+            turns     += 1
+
+total = total_in + total_out + total_cr + total_cc
+rate  = total_out / duration if duration > 0 and total_out > 0 else 0
+
+print(f"  Turns:         {turns}")
+print(f"  Input tokens:  {total_in:,}")
+print(f"  Output tokens: {total_out:,}")
+if total_cr or total_cc:
+    print(f"  Cache read:    {total_cr:,}")
+    print(f"  Cache write:   {total_cc:,}")
+print(f"  Total tokens:  {total:,}")
+if rate > 0:
+    print(f"  Output rate:   {rate:.1f} tok/s")
+PYEOF
+else
+  echo "  (no token data — local endpoint or session not persisted)"
+fi
+
+echo "─────────────────────────────────────────────────"
+exit $_RC
