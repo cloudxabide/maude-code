@@ -105,6 +105,23 @@ usage() {
   exit 1
 }
 
+_maude_splash() {
+  [[ -t 1 ]] || return 0
+  local b r cy yw
+  b=$(tput bold 2>/dev/null)     || b=''
+  r=$(tput sgr0 2>/dev/null)     || r=''
+  cy=$(tput setaf 6 2>/dev/null) || cy=''
+  yw=$(tput setaf 3 2>/dev/null) || yw=''
+  printf '\n'
+  printf '%s  ╔══════════════════════════════════╗\n'        "$cy"
+  printf '%s  ║%-34s║\n'                                     "$cy" ""
+  printf '  ║%s%-34s%s║\n'  "${b}${cy}" "  M A U D E  ·  MyClaude" "${r}${cy}"
+  printf '%s  ║%-34s║\n'                                     "$cy" "  now with AI *"
+  printf '%s  ║%-34s║\n'                                     "$cy" ""
+  printf '  ╚══════════════════════════════════╝%s\n'        "$r"
+  printf '      %s* built with Claude%s\n\n'                 "$yw" "$r"
+}
+
 # ── self-install: pre-scan args BEFORE any endpoint/ollama logic ──────────────
 # This must run early so --install never touches endpoint selection or ollama.
 _maude_fetch_and_place() {
@@ -154,6 +171,7 @@ done
 [[ -z "$MODEL" && -n "${DEFAULT_MODEL:-}" ]] && MODEL="${DEFAULT_MODEL}"
 
 # ── endpoint selection ────────────────────────────────────────────────────────
+_maude_splash
 if [[ $ENDPOINT_EXPLICIT -eq 0 ]]; then
   echo "Select Ollama endpoint:"
   for i in "${!KNOWN_ENDPOINTS[@]}"; do
