@@ -89,6 +89,18 @@ EXTRA_ENDPOINTS=(              # appended to the endpoint menu
 )
 ```
 
+Example — make a remote GPU box the default and add it to the menu:
+
+```bash
+# ~/.config/maude.conf
+DEFAULT_ENDPOINT="10.10.12.251:11434"
+EXTRA_ENDPOINTS=(
+  "10.10.12.251:11434"
+)
+```
+
+With this config, hitting Enter at the endpoint prompt selects `10.10.12.251:11434` automatically. `EXTRA_ENDPOINTS` is merged with the built-in list from the state file, so `localhost:11434` remains available as a numbered option.
+
 ## Prerequisites
 
 - **Claude Code CLI**: Must be installed and available in your PATH.
