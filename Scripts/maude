@@ -93,6 +93,12 @@ if [[ -f "$MAUDE_CONF" ]]; then
   source "$MAUDE_CONF"
 fi
 [[ ${#EXTRA_ENDPOINTS[@]} -gt 0 ]] && KNOWN_ENDPOINTS+=("${EXTRA_ENDPOINTS[@]}")
+_deduped=()
+while IFS= read -r _ep; do
+  [[ -n "$_ep" ]] && _deduped+=("$_ep")
+done < <(printf '%s\n' "${KNOWN_ENDPOINTS[@]}" | sort -u)
+KNOWN_ENDPOINTS=("${_deduped[@]}")
+unset _deduped _ep
 
 usage() {
   grep '^#' "$0" | grep -v '#!/' | sed 's/^# \{0,1\}//'
