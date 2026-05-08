@@ -9,10 +9,12 @@ By automating the configuration of `ANTHROPIC_BASE_URL` and model overrides, `ma
 - **Interactive Setup**: Select from a list of known endpoints and available models via an interactive menu.
 - **Ollama Integration**: Includes health checks for Ollama and can attempt to start the Ollama service automatically on macOS and Linux.
 - **Transparent Proxy**: All arguments passed after `--` are forwarded directly to the `claude` CLI.
-- **Dynamic Configuration**: Automatically maps local models to Claude's internal model tiers (Haiku, Sonnet, Opus) to prevent fallback errors.
+- **Dynamic Configuration**: Automatically maps local models to Claude's internal model tiers (Haiku, Sonnet, -pus) to prevent fallback errors.
 - **Config File**: Override defaults and add endpoints via `~/.config/maude.conf` without editing the script.
-- **Session Stats**: Optional verbose mode reports wall time and token counts after each session.
+-ession Stats**: Optional verbose mode reports wall time and token counts after each session.
 - **Self-Updating**: Built-in `--update` flag replaces the running script with the latest version from the repo.
+
+![](Images/mbp-m4-qwen-coder-30b.gif)
 
 ## Installation
 
