@@ -8,18 +8,25 @@
 # Or use the built-in install flag:
 #   maude --install
 #
-# Usage: maude [-e HOST:PORT] [-m MODEL] [-v] [--install] [-- claude-args...]
+# Usage: maude [-e HOST:PORT] [-m MODEL] [-v] [--install] [--update] [-- claude-args...]
 #   -e HOST:PORT   endpoint (skip menu; default: localhost:11434)
 #   -m MODEL       model name; if omitted, a menu is shown
 #   -v             verbose: show setup details and post-session stats
 #                  (wall time, token counts, output token rate)
 #   --install      download latest version of this script to ~/bin/maude
+#   --update       replace the running script with the latest from the git repo
 #   --             remaining args passed directly to claude
 #
+# State file: ~/.local/state/maude/maude.state (auto-created on first run)
+#   KNOWN_ENDPOINTS=(...)          – list of endpoints shown in the menu
+#   DEFAULT_ENDPOINT="host:port"   – default endpoint (pre-selected in menu)
+#   MAUDE_INSTALL_URL="url"        – URL used by --install
+#   MAUDE_INSTALL_DEST="path"      – destination used by --install
+#
 # Config file: ~/.config/maude.conf (optional, sourced as bash)
-#   DEFAULT_ENDPOINT="host:port"   – default endpoint (overrides built-in)
+#   DEFAULT_ENDPOINT="host:port"   – override state-file default endpoint
 #   DEFAULT_MODEL="model-name"     – skip model menu and use this model
-#   EXTRA_ENDPOINTS=(...)          – extra endpoints added to the menu
+#   EXTRA_ENDPOINTS=(...)          – extra endpoints appended to the menu
 
 set -euo pipefail
 
@@ -45,18 +52,34 @@ if [[ "$OS" == "macos" && "${BASH_VERSINFO[0]}" -lt 4 ]]; then
   echo "NOTE: using system bash ${BASH_VERSION}; install 'bash' via Homebrew for best results" >&2
 fi
 
-# ── known endpoints ───────────────────────────────────────────────────────────
+# ── state file (~/.local/state/maude/maude.state) ─────────────────────────────
+# Created automatically on first run with built-in defaults; edit to customise.
+# Variables defined here: KNOWN_ENDPOINTS, DEFAULT_ENDPOINT,
+#   MAUDE_INSTALL_URL, MAUDE_INSTALL_DEST
+MAUDE_STATE_DIR="${XDG_STATE_HOME:-${HOME}/.local/state}/maude"
+MAUDE_STATE_FILE="${MAUDE_STATE_DIR}/maude.state"
+
+if [[ ! -f "$MAUDE_STATE_FILE" ]]; then
+  mkdir -p "$MAUDE_STATE_DIR"
+  cat > "$MAUDE_STATE_FILE" << 'STATEOF'
+# maude state file — created automatically; edit to customise
 KNOWN_ENDPOINTS=(
   "localhost:11434"
   "10.10.12.251:11434"
 )
-DEFAULT_ENDPOINT="${KNOWN_ENDPOINTS[0]}"
+DEFAULT_ENDPOINT="localhost:11434"
+MAUDE_INSTALL_URL="https://raw.githubusercontent.com/cloudxabide/maude-code/refs/heads/main/Scripts/maude"
+MAUDE_INSTALL_DEST="${HOME}/bin/maude"
+STATEOF
+fi
+# shellcheck source=/dev/null
+source "$MAUDE_STATE_FILE"
+
+# ── runtime vars (not persisted) ──────────────────────────────────────────────
 ENDPOINT=""
 MODEL=""
 ENDPOINT_EXPLICIT=0
 VERBOSE=0
-MAUDE_INSTALL_URL="https://raw.githubusercontent.com/cloudxabide/maude-code/refs/heads/main/Scripts/maude"
-MAUDE_INSTALL_DEST="${HOME}/bin/maude"
 
 # ── config file (~/.config/maude.conf) ────────────────────────────────────────
 # Recognised variables (set any/all):
@@ -78,22 +101,37 @@ usage() {
 
 # ── self-install: pre-scan args BEFORE any endpoint/ollama logic ──────────────
 # This must run early so --install never touches endpoint selection or ollama.
-for _arg in "$@"; do
-  if [[ "$_arg" == "--install" ]]; then
-    echo "Installing maude to ${MAUDE_INSTALL_DEST} ..."
-    mkdir -p "$(dirname "${MAUDE_INSTALL_DEST}")"
-    _tmp=$(mktemp)
-    if curl -fsSL "${MAUDE_INSTALL_URL}" -o "${_tmp}"; then
-      install -m 0755 "${_tmp}" "${MAUDE_INSTALL_DEST}"
-      rm -f "${_tmp}"
-      echo "Installed successfully: ${MAUDE_INSTALL_DEST}"
-    else
-      rm -f "${_tmp}"
-      echo "ERROR: download failed from ${MAUDE_INSTALL_URL}" >&2
-      exit 1
-    fi
-    exit 0
+_maude_fetch_and_place() {
+  local dest="$1" label="$2"
+  echo "${label} maude at ${dest} ..."
+  mkdir -p "$(dirname "${dest}")"
+  local tmp
+  tmp=$(mktemp)
+  if curl -fsSL "${MAUDE_INSTALL_URL}" -o "${tmp}"; then
+    install -m 0755 "${tmp}" "${dest}"
+    rm -f "${tmp}"
+    echo "${label%ing} successfully: ${dest}"
+  else
+    rm -f "${tmp}"
+    echo "ERROR: download failed from ${MAUDE_INSTALL_URL}" >&2
+    exit 1
   fi
+}
+
+for _arg in "$@"; do
+  case "$_arg" in
+    --install)
+      _maude_fetch_and_place "${MAUDE_INSTALL_DEST}" "Installing"
+      exit 0
+      ;;
+    --update)
+      # Update the currently-running script in-place.
+      # Resolves the real path so symlinks point to the refreshed binary.
+      _running=$(cd "$(dirname "$0")" && pwd)/$(basename "$0")
+      _maude_fetch_and_place "${_running}" "Updating"
+      exit 0
+      ;;
+  esac
 done
 
 while [[ $# -gt 0 ]]; do
