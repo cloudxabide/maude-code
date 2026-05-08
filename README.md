@@ -32,10 +32,9 @@ maude --install   # installs latest to ~/bin/maude
 maude --update    # replaces the running script in-place
 ```
 
-### Manual Install
+### Manual (first) Install
 1. Clone this repository.
-2. Copy `Scripts/maude` to `~/bin/maude`.
-3. Make it executable: `chmod +x ~/bin/maude`.
+2. ```bash install -m 0755 Scripts/maude ~/bin/maude```
 
 ## Usage
 
