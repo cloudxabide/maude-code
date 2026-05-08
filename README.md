@@ -10,14 +10,26 @@ By automating the configuration of `ANTHROPIC_BASE_URL` and model overrides, `ma
 - **Ollama Integration**: Includes health checks for Ollama and can attempt to start the Ollama service automatically on macOS and Linux.
 - **Transparent Proxy**: All arguments passed after `--` are forwarded directly to the `claude` CLI.
 - **Dynamic Configuration**: Automatically maps local models to Claude's internal model tiers (Haiku, Sonnet, Opus) to prevent fallback errors.
+- **Config File**: Override defaults and add endpoints via `~/.config/maude.conf` without editing the script.
+- **Session Stats**: Optional verbose mode reports wall time and token counts after each session.
+- **Self-Updating**: Built-in `--update` flag replaces the running script with the latest version from the repo.
 
 ## Installation
 
 ### Quick Install (One-liner)
-Run the following command to install `maude` directly to `~/bin/maude`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/cloudxabide/devops/main/Files/home_bin_maude -o ~/bin/maude && chmod +x ~/bin/maude
+curl -fsSL https://raw.githubusercontent.com/cloudxabide/maude-code/refs/heads/main/Scripts/maude \
+  -o /tmp/maude && install -m 0755 /tmp/maude ~/bin/maude && rm -f /tmp/maude
+```
+
+### Via the built-in flag
+
+If you already have `maude` installed:
+
+```bash
+maude --install   # installs latest to ~/bin/maude
+maude --update    # replaces the running script in-place
 ```
 
 ### Manual Install
@@ -40,13 +52,48 @@ maude -e localhost:11434 -m llama3 -- [claude-args]
 ```
 
 ### Command Reference
-- `-e, --endpoint <HOST:PORT>`: Specify the inference endpoint (default: `localhost:11434`).
-- `-m, --model <MODEL>`: Specify the model name.
-- `--install`: Download the latest version of the script to `~/bin/maude`.
-- `--`: Separate `maude` arguments from arguments passed to the `claude` CLI.
+
+| Flag | Description |
+|------|-------------|
+| `-e, --endpoint HOST:PORT` | Inference endpoint (default: `localhost:11434`) |
+| `-m, --model MODEL` | Model name; skips the model selection menu |
+| `-v, --verbose` | Print setup details and post-session stats (wall time, token counts, output rate) |
+| `--install` | Download the latest script to `~/bin/maude` |
+| `--update` | Replace the currently-running script with the latest from the repo |
+| `--` | Pass remaining arguments directly to `claude` |
+
+## Configuration
+
+### State file: `~/.local/state/maude/maude.state`
+
+Created automatically on first run. Controls the endpoint menu and install destination:
+
+```bash
+KNOWN_ENDPOINTS=(
+  "localhost:11434"
+  "10.10.12.251:11434"
+)
+DEFAULT_ENDPOINT="localhost:11434"
+MAUDE_INSTALL_URL="https://raw.githubusercontent.com/cloudxabide/maude-code/refs/heads/main/Scripts/maude"
+MAUDE_INSTALL_DEST="${HOME}/bin/maude"
+```
+
+### Config file: `~/.config/maude.conf`
+
+Optional. Sourced as bash on every run. Recognised variables:
+
+```bash
+DEFAULT_ENDPOINT="host:port"   # override the default endpoint
+DEFAULT_MODEL="model-name"     # skip the model menu entirely
+EXTRA_ENDPOINTS=(              # appended to the endpoint menu
+  "gpu-box:11434"
+)
+```
 
 ## Prerequisites
 
 - **Claude Code CLI**: Must be installed and available in your PATH.
 - **Local LLM Server**: An OpenAI-compatible API (e.g., Ollama).
-- **Dependencies**: `curl` and `python3` (used for parsing model lists).
+- **`curl`**: Required for endpoint checks and self-install/update.
+- **`jq`** *(recommended)*: Used for model list parsing; falls back to `python3` if not present.
+- **`python3`**: Fallback for model list parsing when `jq` is unavailable.
