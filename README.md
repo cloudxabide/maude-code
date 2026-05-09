@@ -14,8 +14,6 @@ By automating the configuration of `ANTHROPIC_BASE_URL` and model overrides, `ma
 -ession Stats**: Optional verbose mode reports wall time and token counts after each session.
 - **Self-Updating**: Built-in `--update` flag replaces the running script with the latest version from the repo.
 
-![](Images/mbp-m4-qwen-coder-30b.gif)
-
 ## Installation
 
 ### Quick Install (One-liner)
