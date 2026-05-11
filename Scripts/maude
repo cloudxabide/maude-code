@@ -337,10 +337,11 @@ fi
 # Verbose path: wrap session with wall-clock timing and post-session token stats.
 # Token data is read from claude's session JSONL in ~/.claude/projects/ after exit.
 _SESSION_MARKER=$(mktemp)
+trap 'rm -f "${_SESSION_MARKER}"' EXIT
 _SESSION_START=$(date +%s)
 
-claude --model "${MODEL}" "$@"
-_RC=$?
+_RC=0
+claude --model "${MODEL}" "$@" || _RC=$?
 
 _SESSION_END=$(date +%s)
 _DURATION=$((_SESSION_END - _SESSION_START))
@@ -348,7 +349,6 @@ _DURATION=$((_SESSION_END - _SESSION_START))
 _cwd_slug=$(pwd | sed 's|/|-|g')
 _proj_dir="${HOME}/.claude/projects/${_cwd_slug}"
 _session_jsonl=$(find "${_proj_dir}" -name "*.jsonl" -newer "${_SESSION_MARKER}" 2>/dev/null | tail -1)
-rm -f "${_SESSION_MARKER}"
 
 echo ""
 echo "── maude session stats ──────────────────────────"
