@@ -137,17 +137,41 @@ _maude_fetch_and_place() {
   local dest="$1" label="$2"
   echo "${label} maude at ${dest} ..."
   mkdir -p "$(dirname "${dest}")"
-  local tmp
+  local tmp tmp_sum
   tmp=$(mktemp)
-  if curl -fsSL "${MAUDE_INSTALL_URL}" -o "${tmp}"; then
-    install -m 0755 "${tmp}" "${dest}"
-    rm -f "${tmp}"
-    echo "${label%ing} successfully: ${dest}"
-  else
-    rm -f "${tmp}"
+  tmp_sum=$(mktemp)
+  trap 'rm -f "${tmp}" "${tmp_sum}"' RETURN
+
+  if ! curl -fsSL "${MAUDE_INSTALL_URL}" -o "${tmp}"; then
     echo "ERROR: download failed from ${MAUDE_INSTALL_URL}" >&2
     exit 1
   fi
+
+  if ! curl -fsSL "${MAUDE_INSTALL_URL}.sha256" -o "${tmp_sum}"; then
+    echo "ERROR: checksum download failed from ${MAUDE_INSTALL_URL}.sha256" >&2
+    exit 1
+  fi
+
+  local expected actual
+  expected=$(awk '{print $1}' "${tmp_sum}")
+  if command -v shasum >/dev/null 2>&1; then
+    actual=$(shasum -a 256 "${tmp}" | awk '{print $1}')
+  elif command -v sha256sum >/dev/null 2>&1; then
+    actual=$(sha256sum "${tmp}" | awk '{print $1}')
+  else
+    echo "WARNING: no sha256 tool found, skipping checksum verification" >&2
+    actual="${expected}"
+  fi
+
+  if [[ "${expected}" != "${actual}" ]]; then
+    echo "ERROR: checksum mismatch" >&2
+    echo "  expected: ${expected}" >&2
+    echo "  actual:   ${actual}" >&2
+    exit 1
+  fi
+
+  install -m 0755 "${tmp}" "${dest}"
+  echo "${label%ing} successfully: ${dest} (checksum verified)"
 }
 
 for _arg in "$@"; do
