@@ -33,6 +33,12 @@ set -euo pipefail
 
 VERSION="0.1.0"
 
+# ── dependency check ──────────────────────────────────────────────────────────
+for _dep in curl claude; do
+  command -v "$_dep" >/dev/null 2>&1 || { echo "ERROR: '$_dep' is required but not found in PATH" >&2; exit 1; }
+done
+unset _dep
+
 # ── OS detection ──────────────────────────────────────────────────────────────
 OS_TYPE=$(uname -s)
 case "$OS_TYPE" in
