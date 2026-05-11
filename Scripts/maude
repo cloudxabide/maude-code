@@ -321,7 +321,10 @@ echo ""
 # ── environment setup ─────────────────────────────────────────────────────────
 export ANTHROPIC_BASE_URL="${BASE_URL}"
 export ANTHROPIC_AUTH_TOKEN="ollama"   # satisfies claude(1) auth check for local endpoints
-export ANTHROPIC_API_KEY=""            # must be empty string (not unset) to avoid auth conflict
+# ANTHROPIC_API_KEY must be set to an empty string, not unset.
+# If unset, claude(1) treats it as unconfigured and prompts for a real key;
+# an empty string signals "no cloud key" while ANTHROPIC_AUTH_TOKEN takes precedence.
+export ANTHROPIC_API_KEY=""
 # Map all Claude tier models to the selected local model so claude(1) does not
 # attempt to fall back to a different Anthropic model.
 export ANTHROPIC_DEFAULT_HAIKU_MODEL="${MODEL}"
