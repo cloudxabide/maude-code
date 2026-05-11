@@ -101,7 +101,7 @@ KNOWN_ENDPOINTS=("${_deduped[@]}")
 unset _deduped _ep
 
 usage() {
-  grep '^#' "$0" | grep -v '#!/' | sed 's/^# \{0,1\}//'
+  awk 'NR==1{next} /^#/{sub(/^# ?/,""); print; next} {exit}' "$0"
   exit 1
 }
 
