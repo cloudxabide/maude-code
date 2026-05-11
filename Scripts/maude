@@ -190,7 +190,7 @@ if [[ $ENDPOINT_EXPLICIT -eq 0 ]]; then
     printf "  %2d) %s%s\n" $((i+1)) "${KNOWN_ENDPOINTS[$i]}" "$marker"
   done
   echo ""
-  read -rp "Select endpoint [1-${#KNOWN_ENDPOINTS[@]}] (Enter for default): " EP_CHOICE
+  read -rp "Select endpoint [1-${#KNOWN_ENDPOINTS[@]}] (Enter for default): " EP_CHOICE || { echo ""; exit 1; }
 
   if [[ -z "$EP_CHOICE" ]]; then
     ENDPOINT="$DEFAULT_ENDPOINT"
@@ -213,7 +213,7 @@ _ollama_ready() {
 if ! _ollama_ready; then
   echo ""
   echo "WARNING: Ollama not reachable at ${ENDPOINT}" >&2
-  read -rp "Would you like to start Ollama? [y/N]: " START_ANSWER
+  read -rp "Would you like to start Ollama? [y/N]: " START_ANSWER || { echo ""; exit 1; }
   case "${START_ANSWER,,}" in
     y|yes)
       if [[ "$OS" == "macos" ]]; then
@@ -302,7 +302,7 @@ for m in items:
     printf "  %2d) %s\n" $((i+1)) "${MODELS[$i]}"
   done
   echo ""
-  read -rp "Select model [1-${#MODELS[@]}]: " CHOICE
+  read -rp "Select model [1-${#MODELS[@]}]: " CHOICE || { echo ""; exit 1; }
 
   if ! [[ "$CHOICE" =~ ^[0-9]+$ ]] || \
      (( CHOICE < 1 )) || (( CHOICE > ${#MODELS[@]} )); then
