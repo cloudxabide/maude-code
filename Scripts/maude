@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# maude - MyclAude: run claude(1) against a local OpenAI-compatible inference endpoint
+# maude - MyclAude: run claude(1) against a local or remote OpenAI-compatible inference endpoint
 #
 # Install (one-liner):
 #   curl -fsSL https://raw.githubusercontent.com/cloudxabide/maude-code/refs/heads/main/Scripts/maude \
@@ -10,6 +10,7 @@
 #
 # Usage: maude [-e HOST:PORT] [-m MODEL] [-v] [--install] [--update] [-- claude-args...]
 #   -e HOST:PORT   endpoint (skip menu; default: localhost:11434)
+#                  accepts bare host:port (http://) or full https://host/path
 #   -m MODEL       model name; if omitted, a menu is shown
 #   -v             verbose: show setup details and post-session stats
 #                  (wall time, token counts, output token rate)
@@ -28,10 +29,15 @@
 #   DEFAULT_ENDPOINT="host:port"   – override state-file default endpoint
 #   DEFAULT_MODEL="model-name"     – skip model menu and use this model
 #   EXTRA_ENDPOINTS=(...)          – extra endpoints appended to the menu
+#   MAUDE_AUTH_TOKEN="key"        – API key for authenticated endpoints (e.g. NIM)
+#
+# Environment variables (take precedence over config file):
+#   MAUDE_AUTH_TOKEN               – API key sent as "Authorization: Bearer <key>"
+#   NIM_API_KEY                    – NVIDIA NIM API key; alias for MAUDE_AUTH_TOKEN
 
 set -euo pipefail
 
-VERSION="0.1.0"
+VERSION="0.2.0"
 
 # ── dependency check ──────────────────────────────────────────────────────────
 for _dep in curl claude; do
@@ -95,6 +101,7 @@ VERBOSE=0
 #   DEFAULT_ENDPOINT="host:port"   – overrides built-in default endpoint
 #   DEFAULT_MODEL="model-name"     – skip model menu and use this model
 #   EXTRA_ENDPOINTS=(...)          – extra endpoints appended to the menu
+#   MAUDE_AUTH_TOKEN="key"        – API key for authenticated endpoints
 EXTRA_ENDPOINTS=()
 MAUDE_CONF="${XDG_CONFIG_HOME:-${HOME}/.config}/maude.conf"
 if [[ -f "$MAUDE_CONF" ]]; then
@@ -108,6 +115,10 @@ while IFS= read -r _ep; do
 done < <(printf '%s\n' "${KNOWN_ENDPOINTS[@]}" | sort -u)
 KNOWN_ENDPOINTS=("${_deduped[@]}")
 unset _deduped _ep
+
+# Auth token: env var MAUDE_AUTH_TOKEN > config MAUDE_AUTH_TOKEN > NIM_API_KEY > "ollama"
+# "ollama" is the sentinel for unauthenticated local endpoints.
+MAUDE_AUTH_TOKEN="${MAUDE_AUTH_TOKEN:-${NIM_API_KEY:-ollama}}"
 
 usage() {
   awk 'NR==1{next} /^#/{sub(/^# ?/,""); print; next} {exit}' "$0"
@@ -207,7 +218,7 @@ done
 # ── endpoint selection ────────────────────────────────────────────────────────
 _maude_splash
 if [[ $ENDPOINT_EXPLICIT -eq 0 ]]; then
-  echo "Select Ollama endpoint:"
+  echo "Select inference endpoint:"
   for i in "${!KNOWN_ENDPOINTS[@]}"; do
     marker=""
     [[ "${KNOWN_ENDPOINTS[$i]}" == "$DEFAULT_ENDPOINT" ]] && marker=" (default)"
@@ -227,69 +238,112 @@ if [[ $ENDPOINT_EXPLICIT -eq 0 ]]; then
   fi
 fi
 
-BASE_URL="http://${ENDPOINT}"
+# Support full URLs (https://...) in addition to bare host:port (assumes http://)
+if [[ "$ENDPOINT" == *"://"* ]]; then
+  BASE_URL="${ENDPOINT%/}"
+else
+  BASE_URL="http://${ENDPOINT}"
+fi
 
-# ── ollama availability check ─────────────────────────────────────────────────
+# ── auth helper ───────────────────────────────────────────────────────────────
+# Adds Authorization: Bearer header when a real API key is configured.
+# "ollama" is the sentinel for local/unauthenticated endpoints.
+_curl_auth() {
+  if [[ "$MAUDE_AUTH_TOKEN" != "ollama" ]]; then
+    curl -H "Authorization: Bearer ${MAUDE_AUTH_TOKEN}" "$@"
+  else
+    curl "$@"
+  fi
+}
+
+# ── endpoint availability check ───────────────────────────────────────────────
 _ollama_ready() {
   curl -sf --max-time 3 "${BASE_URL}/api/tags" >/dev/null 2>&1
 }
 
-if ! _ollama_ready; then
-  echo ""
-  echo "WARNING: Ollama not reachable at ${ENDPOINT}" >&2
-  read -rp "Would you like to start Ollama? [y/N]: " START_ANSWER || { echo ""; exit 1; }
-  case "${START_ANSWER,,}" in
-    y|yes)
-      if [[ "$OS" == "macos" ]]; then
-        echo "Starting Ollama (macOS native)..."
-        # Try the macOS app bundle first; fall back to CLI daemon
-        if open -a Ollama 2>/dev/null; then
-          echo "  Launched Ollama.app — waiting for it to become ready..."
-        else
-          echo "  'open -a Ollama' failed; trying 'ollama serve' in background..."
-          ollama serve >/dev/null 2>&1 &
-        fi
-      else
-        # Linux: assume open-webui / docker compose stack
-        echo "Starting Ollama (Linux/Docker)..."
-        if docker start ollama 2>/dev/null; then
-          echo "  Started existing 'ollama' container."
-        elif docker compose up -d ollama 2>/dev/null; then
-          echo "  Started 'ollama' via docker compose."
-        else
-          echo "ERROR: could not start Ollama container. Start it manually and retry." >&2
-          exit 1
-        fi
-      fi
+_endpoint_ready() {
+  _curl_auth -sf --max-time 5 "${BASE_URL}/v1/models" >/dev/null 2>&1
+}
 
-      echo ""
-      echo -n "Waiting for Ollama to become ready"
-      for _i in $(seq 1 20); do
-        sleep 2
-        if _ollama_ready; then
-          echo " ready."
-          break
+# Detect endpoint type: Ollama responds to /api/tags; NIM/generic uses /v1/models.
+_ENDPOINT_TYPE="openai"
+if _ollama_ready; then
+  _ENDPOINT_TYPE="ollama"
+elif ! _endpoint_ready; then
+  # Endpoint not reachable — offer to start Ollama only for local, unauthenticated setups
+  _is_local=0
+  if [[ "$MAUDE_AUTH_TOKEN" == "ollama" && "$ENDPOINT" != *"://"* ]]; then
+    # Heuristic: no dots in host part → likely a bare IP or "localhost" → local
+    _host="${ENDPOINT%%:*}"
+    [[ "$_host" != *"."* || "$_host" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] && _is_local=1
+  fi
+
+  if [[ $_is_local -eq 1 ]]; then
+    echo ""
+    echo "WARNING: Ollama not reachable at ${ENDPOINT}" >&2
+    read -rp "Would you like to start Ollama? [y/N]: " START_ANSWER || { echo ""; exit 1; }
+    case "${START_ANSWER,,}" in
+      y|yes)
+        if [[ "$OS" == "macos" ]]; then
+          echo "Starting Ollama (macOS native)..."
+          # Try the macOS app bundle first; fall back to CLI daemon
+          if open -a Ollama 2>/dev/null; then
+            echo "  Launched Ollama.app — waiting for it to become ready..."
+          else
+            echo "  'open -a Ollama' failed; trying 'ollama serve' in background..."
+            ollama serve >/dev/null 2>&1 &
+          fi
+        else
+          # Linux: assume open-webui / docker compose stack
+          echo "Starting Ollama (Linux/Docker)..."
+          if docker start ollama 2>/dev/null; then
+            echo "  Started existing 'ollama' container."
+          elif docker compose up -d ollama 2>/dev/null; then
+            echo "  Started 'ollama' via docker compose."
+          else
+            echo "ERROR: could not start Ollama container. Start it manually and retry." >&2
+            exit 1
+          fi
         fi
-        echo -n "."
-        if (( _i == 20 )); then
-          echo ""
-          echo "ERROR: Ollama still not reachable after 40 seconds." >&2
-          exit 1
-        fi
-      done
-      ;;
-    *)
-      echo "Aborting." >&2
-      exit 1
-      ;;
-  esac
+
+        echo ""
+        echo -n "Waiting for Ollama to become ready"
+        for _i in $(seq 1 20); do
+          sleep 2
+          if _ollama_ready; then
+            echo " ready."
+            _ENDPOINT_TYPE="ollama"
+            break
+          fi
+          echo -n "."
+          if (( _i == 20 )); then
+            echo ""
+            echo "ERROR: Ollama still not reachable after 40 seconds." >&2
+            exit 1
+          fi
+        done
+        ;;
+      *)
+        echo "Aborting." >&2
+        exit 1
+        ;;
+    esac
+  else
+    echo "" >&2
+    echo "ERROR: endpoint not reachable at ${ENDPOINT}" >&2
+    echo "  Tried: ${BASE_URL}/v1/models" >&2
+    if [[ "$MAUDE_AUTH_TOKEN" == "ollama" ]]; then
+      echo "  Hint: if this endpoint requires authentication, set MAUDE_AUTH_TOKEN or NIM_API_KEY." >&2
+    fi
+    exit 1
+  fi
 fi
 
 # ── model selection ───────────────────────────────────────────────────────────
 if [[ -z "$MODEL" ]]; then
   echo ""
   echo "Querying ${BASE_URL}/v1/models ..."
-  MODELS_JSON=$(curl -sf "${BASE_URL}/v1/models") || {
+  MODELS_JSON=$(_curl_auth -sf "${BASE_URL}/v1/models") || {
     echo "ERROR: could not reach ${BASE_URL}/v1/models" >&2
     exit 1
   }
@@ -344,7 +398,10 @@ echo ""
 
 # ── environment setup ─────────────────────────────────────────────────────────
 export ANTHROPIC_BASE_URL="${BASE_URL}"
-export ANTHROPIC_AUTH_TOKEN="ollama"   # satisfies claude(1) auth check for local endpoints
+# ANTHROPIC_AUTH_TOKEN satisfies claude(1) auth check; use the configured token.
+# For local/Ollama endpoints MAUDE_AUTH_TOKEN is "ollama" (a harmless sentinel).
+# For NIM and other authenticated endpoints it is the real API key.
+export ANTHROPIC_AUTH_TOKEN="${MAUDE_AUTH_TOKEN}"
 # ANTHROPIC_API_KEY must be set to an empty string, not unset.
 # If unset, claude(1) treats it as unconfigured and prompts for a real key;
 # an empty string signals "no cloud key" while ANTHROPIC_AUTH_TOKEN takes precedence.
